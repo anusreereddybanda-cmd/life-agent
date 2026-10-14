@@ -114,25 +114,6 @@ export default function GalleryPage() {
     setPhotos(photosWithUrls);
   }, [getUser]);
 
-  const refreshGallery = useCallback(async () => {
-    setLoading(true);
-    setError('');
-
-    try {
-      await loadAlbums();
-
-      if (activeAlbum) {
-        await loadPhotos(activeAlbum);
-      }
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Could not load the gallery.',
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [activeAlbum, loadAlbums, loadPhotos]);
-
   useEffect(() => {
     let cancelled = false;
 
