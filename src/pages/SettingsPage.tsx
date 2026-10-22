@@ -1,13 +1,79 @@
 import React from 'react';
-import { Lock, Cloud, Download, ShieldAlert, Bell, Palette } from 'lucide-react';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Lock,
+  Cloud,
+  Download,
+  ShieldAlert,
+  Bell,
+  Palette,
+  LogOut,
+} from 'lucide-react';
+import { supabase } from '../supabase';
 
-export default function SettingsPage() {
+export default function SettingsPage({ userEmail }: { userEmail?: string }) {
+  const navigate = useNavigate();
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    setLogoutError('');
+
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      navigate('/auth', { replace: true });
+    } catch (error) {
+      setLogoutError(
+        error instanceof Error ? error.message : 'Could not sign out. Please try again.'
+      );
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-12">
       <header className="mb-8">
         <h1 className="text-4xl font-serif text-sage-800 mb-2">Settings</h1>
         <p className="text-ink-400">Manage your account, privacy, and data.</p>
       </header>
+
+      <section className="glass-panel p-6 md:p-8" aria-labelledby="account-heading">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 id="account-heading" className="text-2xl font-serif text-ink-900 mb-2">
+              Account
+            </h2>
+            <p className="text-sm text-ink-400">Signed-in account email</p>
+            <p className="mt-1 font-medium text-ink-700">
+              {userEmail || 'Email is not available for this account.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            disabled={loggingOut}
+            className="flex items-center justify-center gap-2 rounded-lg bg-red-600 px-5 py-3 font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loggingOut ? (
+              <span>Signing out...</span>
+            ) : (
+              <>
+                <LogOut size={18} />
+                <span>Logout</span>
+              </>
+            )}
+          </button>
+        </div>
+        {logoutError && (
+          <p role="alert" className="mt-4 text-sm text-red-700">
+            Could not log out: {logoutError}
+          </p>
+        )}
+      </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1 space-y-2">

@@ -7,11 +7,14 @@ import {
   ImagePlus,
   Images,
   LoaderCircle,
+  Pencil,
   Plus,
   Trash2,
   X,
 } from 'lucide-react';
 import { supabase } from '../supabase';
+import PageBackground from '../components/PageBackground';
+import { formatSupabaseError } from '../utils/supabaseError';
 
 type Album = {
   id: string;
@@ -38,16 +41,21 @@ type Photo = {
 };
 
 const BUCKET = 'memory-photos';
+const allowedImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const maxPhotoSize = 10 * 1024 * 1024;
 
-export default function GalleryPage() {
+export default function GalleryPage({ userId }: { userId: string }) {
   const [albums, setAlbums] = useState<Album[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [activeAlbum, setActiveAlbum] = useState<Album | null>(null);
+  const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
+  const [captionDraft, setCaptionDraft] = useState('');
 
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [creatingAlbum, setCreatingAlbum] = useState(false);
   const [deletingPhoto, setDeletingPhoto] = useState<string | null>(null);
+  const [savingCaption, setSavingCaption] = useState(false);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [albumTitle, setAlbumTitle] = useState('');
@@ -57,15 +65,21 @@ export default function GalleryPage() {
   const [error, setError] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadLock = useRef(false);
+  const createAlbumLock = useRef(false);
+  const captionSaveLock = useRef(false);
+  const deleteLock = useRef(false);
 
   const getUser = useCallback(async () => {
     const { data, error: authError } = await supabase.auth.getUser();
 
     if (authError) throw authError;
-    if (!data.user) throw new Error('Please log in to use your gallery.');
+    if (!data.user || data.user.id !== userId) {
+      throw new Error('Please sign in again to use your gallery.');
+    }
 
     return data.user;
-  }, []);
+  }, [userId]);
 
   const loadAlbums = useCallback(async () => {
     const user = await getUser();
@@ -83,6 +97,9 @@ export default function GalleryPage() {
 
   const loadPhotos = useCallback(async (album: Album) => {
     const user = await getUser();
+    if (album.user_id !== user.id) {
+      throw new Error('You can only open your own albums.');
+    }
 
     const { data, error: queryError } = await supabase
       .from('photos')
@@ -97,15 +114,15 @@ export default function GalleryPage() {
 
     const photosWithUrls = await Promise.all(
       rows.map(async (photo) => {
+        if (!photo.storage_path.startsWith(`${user.id}/`)) {
+          throw new Error('A photo path does not belong to the signed-in account.');
+        }
         const { data: signedData, error: signedError } =
           await supabase.storage
             .from(BUCKET)
             .createSignedUrl(photo.storage_path, 3600);
 
-        if (signedError) {
-          console.error('Could not create photo URL:', signedError.message);
-          return photo;
-        }
+        if (signedError) throw signedError;
 
         return { ...photo, imageUrl: signedData.signedUrl };
       }),
@@ -178,6 +195,7 @@ export default function GalleryPage() {
 
   const createAlbum = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (createAlbumLock.current) return;
     setError('');
     setStatus('');
 
@@ -188,6 +206,7 @@ export default function GalleryPage() {
       return;
     }
 
+    createAlbumLock.current = true;
     setCreatingAlbum(true);
 
     try {
@@ -219,12 +238,14 @@ export default function GalleryPage() {
         err instanceof Error ? err.message : 'Could not create the album.',
       );
     } finally {
+      createAlbumLock.current = false;
       setCreatingAlbum(false);
     }
   };
 
   const uploadPhotos = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (uploadLock.current) return;
     setError('');
     setStatus('');
 
@@ -241,19 +262,27 @@ export default function GalleryPage() {
     }
 
     const selectedFiles = Array.from(files);
-    const invalidFile = selectedFiles.find(
-      (file) => !file.type.startsWith('image/'),
-    );
+    const invalidFile = selectedFiles.find((file) => {
+      return (
+        !allowedImageTypes.has(file.type) ||
+        file.size === 0 ||
+        file.size > maxPhotoSize
+      );
+    });
 
     if (invalidFile) {
-      setError('Please select image files only.');
+      setError(
+        `${invalidFile.name}: choose a JPEG, PNG, or WebP image no larger than 10 MB.`
+      );
       return;
     }
 
+    uploadLock.current = true;
     setUploading(true);
 
     let successfulUploads = 0;
     const uploadErrors: string[] = [];
+    const album = activeAlbum;
 
     try {
       const user = await getUser();
@@ -271,7 +300,9 @@ export default function GalleryPage() {
           });
 
         if (storageError) {
-          uploadErrors.push(`${file.name}: ${storageError.message}`);
+          uploadErrors.push(
+            `${file.name}: ${formatSupabaseError(storageError, 'Storage upload failed')}`
+          );
           continue;
         }
 
@@ -279,7 +310,7 @@ export default function GalleryPage() {
           .from('photos')
           .insert({
             user_id: user.id,
-            album_id: activeAlbum.id,
+            album_id: album.id,
             storage_path: storagePath,
             file_name: file.name,
             mime_type: file.type,
@@ -287,7 +318,14 @@ export default function GalleryPage() {
           });
 
         if (metadataError) {
-          uploadErrors.push(`${file.name}: ${metadataError.message}`);
+          let message = formatSupabaseError(
+            metadataError,
+            'Photo metadata could not be saved'
+          );
+          if (/albums|album_id/i.test(message)) {
+            message += ' If the error says the table or column is missing, apply supabase/migrations/0008_gallery_albums.sql in Supabase.';
+          }
+          uploadErrors.push(`${file.name}: ${message}`);
 
           // Remove the uploaded file if its database record failed.
           const { error: cleanupError } = await supabase.storage
@@ -295,7 +333,9 @@ export default function GalleryPage() {
             .remove([storagePath]);
 
           if (cleanupError) {
-            console.error('Storage cleanup failed:', cleanupError.message);
+            uploadErrors.push(
+              `${file.name}: the photo file could not be cleaned up after its metadata failed to save (${formatSupabaseError(cleanupError, 'Unknown Storage error')}).`
+            );
           }
 
           continue;
@@ -306,12 +346,25 @@ export default function GalleryPage() {
 
       if (fileInputRef.current) fileInputRef.current.value = '';
 
-      await loadPhotos(activeAlbum);
-      await loadAlbums();
+      try {
+        await loadPhotos(album);
+        await loadAlbums();
+      } catch (refreshError) {
+        const refreshMessage =
+          refreshError instanceof Error
+            ? refreshError.message
+            : 'Could not refresh the gallery.';
+        setError(
+          successfulUploads > 0
+            ? `${successfulUploads} photo(s) uploaded, but the gallery could not refresh: ${refreshMessage}`
+            : refreshMessage
+        );
+        return;
+      }
 
       if (uploadErrors.length === 0) {
         setStatus(
-          `${successfulUploads} photo(s) uploaded to "${activeAlbum.title}".`,
+          `${successfulUploads} photo(s) uploaded to "${album.title}".`,
         );
       } else {
         setError(
@@ -321,20 +374,23 @@ export default function GalleryPage() {
       }
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Photo upload failed.',
+        formatSupabaseError(err, 'Photo upload failed.')
       );
     } finally {
+      uploadLock.current = false;
       setUploading(false);
     }
   };
 
   const deletePhoto = async (photo: Photo) => {
+    if (deleteLock.current) return;
     const confirmed = window.confirm(
       `Delete "${photo.file_name || 'this photo'}"? This cannot be undone.`,
     );
 
     if (!confirmed) return;
 
+    deleteLock.current = true;
     setDeletingPhoto(photo.id);
     setError('');
     setStatus('');
@@ -345,6 +401,14 @@ export default function GalleryPage() {
       if (photo.user_id !== user.id) {
         throw new Error('You can only delete your own photos.');
       }
+      if (!photo.storage_path.startsWith(`${user.id}/`)) {
+        throw new Error('This photo path does not belong to your account.');
+      }
+
+      const { data: photoBlob, error: downloadError } = await supabase.storage
+        .from(BUCKET)
+        .download(photo.storage_path);
+      if (downloadError) throw downloadError;
 
       const { error: storageError } = await supabase.storage
         .from(BUCKET)
@@ -352,31 +416,120 @@ export default function GalleryPage() {
 
       if (storageError) throw storageError;
 
-      const { error: deleteError } = await supabase
+      const { data: deletedPhoto, error: deleteError } = await supabase
         .from('photos')
         .delete()
         .eq('id', photo.id)
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .select('id')
+        .maybeSingle();
 
-      if (deleteError) throw deleteError;
+      if (deleteError || !deletedPhoto) {
+        const { error: restoreError } = await supabase.storage
+          .from(BUCKET)
+          .upload(photo.storage_path, photoBlob, {
+            contentType: photo.mime_type,
+            upsert: false,
+          });
+
+        if (restoreError) {
+          throw new Error(
+            `Photo metadata could not be deleted${
+              deleteError ? `: ${deleteError.message}` : ''
+            }, and the storage file could not be restored: ${restoreError.message}. Contact support with photo ID ${photo.id}.`
+          );
+        }
+        if (deleteError) throw deleteError;
+        throw new Error('The photo metadata was not deleted; the file was restored.');
+      }
 
       setPhotos((previous) => previous.filter((item) => item.id !== photo.id));
+      if (selectedPhoto?.id === photo.id) setSelectedPhoto(null);
       setStatus('Photo deleted successfully.');
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Could not delete the photo.',
       );
     } finally {
+      deleteLock.current = false;
       setDeletingPhoto(null);
+    }
+  };
+
+  const openPhoto = (photo: Photo) => {
+    setSelectedPhoto(photo);
+    setCaptionDraft(photo.caption ?? '');
+    setError('');
+    setStatus('');
+  };
+
+  const saveCaption = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedPhoto || captionSaveLock.current) return;
+
+    const caption = captionDraft.trim();
+    if (caption.length > 1000) {
+      setError('Captions must be 1,000 characters or fewer.');
+      return;
+    }
+
+    captionSaveLock.current = true;
+    setSavingCaption(true);
+    setError('');
+    setStatus('');
+
+    try {
+      const user = await getUser();
+      if (
+        selectedPhoto.user_id !== user.id ||
+        !selectedPhoto.storage_path.startsWith(`${user.id}/`)
+      ) {
+        throw new Error('You can only update your own photos.');
+      }
+
+      const { data, error: updateError } = await supabase
+        .from('photos')
+        .update({ caption: caption || null })
+        .eq('id', selectedPhoto.id)
+        .eq('user_id', user.id)
+        .select('*')
+        .single();
+      if (updateError) throw updateError;
+
+      const updatedPhoto: Photo = {
+        ...(data as Photo),
+        imageUrl: selectedPhoto.imageUrl,
+      };
+      setPhotos((current) =>
+        current.map((photo) =>
+          photo.id === updatedPhoto.id ? updatedPhoto : photo
+        )
+      );
+      setSelectedPhoto(updatedPhoto);
+      setCaptionDraft(updatedPhoto.caption ?? '');
+      setStatus('Caption saved successfully.');
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Could not save the caption.'
+      );
+    } finally {
+      captionSaveLock.current = false;
+      setSavingCaption(false);
     }
   };
 
   const formatDate = (date: string | null) => {
     if (!date) return '';
-    return new Date(`${date}T00:00:00`).toLocaleDateString();
+    const parsedDate = new Date(
+      date.length === 10 ? `${date}T00:00:00` : date
+    );
+    return Number.isNaN(parsedDate.getTime())
+      ? ''
+      : parsedDate.toLocaleDateString();
   };
 
   return (
+    <PageBackground userId={userId} column="gallery_background_path">
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
@@ -384,6 +537,7 @@ export default function GalleryPage() {
             <button
               type="button"
               onClick={backToAlbums}
+              disabled={uploading}
               className="rounded-xl border border-gray-200 p-2 transition hover:bg-gray-100"
               aria-label="Back to albums"
             >
@@ -479,6 +633,18 @@ export default function GalleryPage() {
               placeholder="e.g. Birthday, College Memories, Freshers Party"
               className="w-full rounded-xl border border-gray-300 px-3 py-2.5 outline-none focus:border-gray-600"
             />
+            <div className="flex flex-wrap gap-2 pt-1">
+              {['School', 'Intermediate', 'BTech', 'Personal'].map((title) => (
+                <button
+                  key={title}
+                  type="button"
+                  onClick={() => setAlbumTitle(title)}
+                  className="rounded-full border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:border-gray-500 hover:text-gray-900"
+                >
+                  {title}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -532,7 +698,7 @@ export default function GalleryPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp"
             multiple
             disabled={uploading}
             onChange={() => {
@@ -543,7 +709,7 @@ export default function GalleryPage() {
           />
 
           <p className="text-sm text-gray-500">
-            Select multiple photos together. They will be saved in this album.
+            Select JPEG, PNG, or WebP photos up to 10 MB each. They will be saved in this album.
           </p>
 
           <button
@@ -581,21 +747,44 @@ export default function GalleryPage() {
                 className="group relative overflow-hidden rounded-2xl border border-gray-200 bg-white"
               >
                 {photo.imageUrl ? (
-                  <img
-                    src={photo.imageUrl}
-                    alt={photo.caption || photo.file_name || 'Gallery photo'}
-                    loading="lazy"
-                    className="aspect-square w-full object-cover transition duration-300 group-hover:scale-[1.02]"
-                  />
+                  <button
+                    type="button"
+                    onClick={() => openPhoto(photo)}
+                    className="block w-full"
+                    aria-label={`Open ${photo.caption || photo.file_name || 'gallery photo'}`}
+                  >
+                    <img
+                      src={photo.imageUrl}
+                      alt={photo.caption || photo.file_name || 'Gallery photo'}
+                      loading="lazy"
+                      className="aspect-square w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+                    />
+                  </button>
                 ) : (
                   <div className="flex aspect-square items-center justify-center bg-gray-100 text-sm text-gray-500">
                     Image unavailable
                   </div>
                 )}
 
+                <button
+                  type="button"
+                  onClick={() => openPhoto(photo)}
+                  className="block w-full p-2.5 text-left"
+                  aria-label={`View details for ${photo.file_name || 'photo'}`}
+                >
+                  <span className="block truncate text-sm font-medium text-gray-800">
+                    {photo.caption || photo.file_name || 'Photo'}
+                  </span>
+                  <span className="mt-1 block text-xs text-gray-500">
+                    {photo.taken_at
+                      ? `Taken ${formatDate(photo.taken_at)}`
+                      : `Uploaded ${formatDate(photo.created_at)}`}
+                  </span>
+                </button>
+
                 <div className="flex items-center justify-between gap-2 p-2.5">
                   <span className="min-w-0 truncate text-xs text-gray-600">
-                    {photo.file_name || 'Photo'}
+                    {photo.file_name || ''}
                   </span>
                   <button
                     type="button"
@@ -669,6 +858,121 @@ export default function GalleryPage() {
           ))}
         </div>
       )}
+
+      {selectedPhoto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          role="presentation"
+          onClick={() => setSelectedPhoto(null)}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="photo-preview-title"
+            className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-4 shadow-xl sm:p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2
+                  id="photo-preview-title"
+                  className="truncate text-lg font-semibold text-gray-900"
+                >
+                  {selectedPhoto.file_name || 'Photo'}
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  {selectedPhoto.taken_at
+                    ? `Taken ${formatDate(selectedPhoto.taken_at)}`
+                    : `Uploaded ${formatDate(selectedPhoto.created_at)}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedPhoto(null)}
+                aria-label="Close photo preview"
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {selectedPhoto.imageUrl ? (
+              <img
+                src={selectedPhoto.imageUrl}
+                alt={selectedPhoto.caption || selectedPhoto.file_name || 'Gallery photo'}
+                className="mx-auto max-h-[55vh] w-full rounded-xl bg-gray-100 object-contain"
+              />
+            ) : (
+              <div className="flex h-56 items-center justify-center rounded-xl bg-gray-100 text-sm text-gray-500">
+                Image unavailable
+              </div>
+            )}
+
+            {status && (
+              <p
+                role="status"
+                className="mt-4 rounded-xl border border-green-200 bg-green-50 p-3 text-sm text-green-800"
+              >
+                {status}
+              </p>
+            )}
+            {error && (
+              <p
+                role="alert"
+                className="mt-4 whitespace-pre-line rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+              >
+                {error}
+              </p>
+            )}
+
+            <form onSubmit={saveCaption} className="mt-5 space-y-3">
+              <label
+                htmlFor="photo-caption"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Caption
+              </label>
+              <textarea
+                id="photo-caption"
+                rows={3}
+                maxLength={1000}
+                value={captionDraft}
+                onChange={(event) => setCaptionDraft(event.target.value)}
+                placeholder="Add a caption"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 outline-none focus:border-gray-600"
+              />
+              <div className="flex flex-wrap justify-between gap-3">
+                <button
+                  type="submit"
+                  disabled={savingCaption}
+                  className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+                >
+                  {savingCaption ? (
+                    <LoaderCircle size={17} className="animate-spin" />
+                  ) : (
+                    <Pencil size={17} />
+                  )}
+                  {savingCaption ? 'Saving...' : 'Save Caption'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deletePhoto(selectedPhoto)}
+                  disabled={deletingPhoto === selectedPhoto.id}
+                  className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                >
+                  {deletingPhoto === selectedPhoto.id ? (
+                    <LoaderCircle size={17} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={17} />
+                  )}
+                  Delete Photo
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </div>
+    </PageBackground>
   );
 }

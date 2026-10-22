@@ -25,8 +25,20 @@ and expect `Success. No rows returned` before moving on.
 5. `supabase/migrations/0005_photos_and_link_tables.sql`
 6. `supabase/migrations/0006_row_level_security.sql`
 7. `supabase/migrations/0007_private_photo_storage.sql`
+8. `supabase/migrations/0008_gallery_albums.sql`
+9. `supabase/migrations/0009_profile_page_backgrounds.sql`
 
 If one fails, **stop** and send me the exact error. Do not skip ahead.
+
+Migration 0008 adds owner-only `albums` access and the optional `photos.album_id`
+relationship required by the Gallery. If you previously created albums directly
+in Supabase, inspect the existing `albums` table and its policies before running
+0008; do not run it over a differently shaped table without reconciling that
+schema first.
+
+Migration 0009 adds separate background-image path fields to each existing
+profile row. It reuses the private `memory-photos` bucket and its authenticated
+per-user-folder Storage policies; no public bucket or service-role key is used.
 
 If the Dashboard shows a warning about a "destructive operation" it is reacting to the
 `drop policy if exists` / `drop trigger if exists` lines. Those only remove objects this

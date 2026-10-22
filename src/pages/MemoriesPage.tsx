@@ -2,6 +2,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { PenSquare, BookOpen } from 'lucide-react';
 import { supabase } from '../supabase';
+import PageBackground from '../components/PageBackground';
 
 type Memory = {
   id: string;
@@ -11,7 +12,7 @@ type Memory = {
   memory_date: string | null;
 };
 
-export default function MemoriesPage() {
+export default function MemoriesPage({ userId }: { userId: string }) {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('College');
@@ -78,6 +79,7 @@ export default function MemoriesPage() {
   }
 
   return (
+    <PageBackground userId={userId} column="memories_background_path">
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 h-full flex flex-col">
       <header className="flex justify-between items-end mb-4">
         <div>
@@ -200,6 +202,7 @@ export default function MemoriesPage() {
         </div>
       )}
     </div>
+    </PageBackground>
   );
 }
 

@@ -1,21 +1,24 @@
-
-
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, ArrowRight, Heart } from 'lucide-react';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 
 export default function AuthPage() {
+  const location = useLocation();
   const navigate = useNavigate();
-  const [isLogin, setIsLogin] = useState(true);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isLogin = searchParams.get('mode') !== 'signup';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
+  const [isError, setIsError] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setLoading(true);
     setMessage('');
+    setIsError(false);
 
     try {
       const result = isLogin
@@ -24,80 +27,141 @@ export default function AuthPage() {
 
       if (result.error) throw result.error;
 
-      
-if (isLogin) {
-  navigate('/');
-  return;
-}
+      if (isLogin) {
+        const from = (location.state as { from?: { pathname?: string } } | null)
+          ?.from?.pathname;
+        navigate(from || '/');
+        return;
+      }
 
-setMessage(
-  'Signup submitted. Check your email if confirmation is required.'
-);
-
+      setMessage(
+        'Signup submitted. Check your email if confirmation is required.'
+      );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Something went wrong.');
+      setIsError(true);
+      setMessage(
+        error instanceof Error ? error.message : 'Something went wrong.'
+      );
     } finally {
       setLoading(false);
     }
   }
 
+  function toggleMode() {
+    setMessage('');
+    setIsError(false);
+    setSearchParams(isLogin ? { mode: 'signup' } : {});
+  }
+
   return (
-    <div className="max-w-md mx-auto mt-12 glass-panel p-8">
-      <h1 className="text-3xl font-serif text-sage-800 mb-2">
-        {isLogin ? 'Welcome Back' : 'Create Account'}
-      </h1>
+    <main className="auth-page">
+      <section className="auth-brand-panel" aria-label="Life Agent">
+        <Link to="/" className="auth-brand">
+          <span className="auth-brand__mark"><Heart size={19} /></span>
+          <span>Life Agent</span>
+        </Link>
 
-      <p className="text-ink-400 mb-6">
-        Sign in to keep your memories private.
-      </p>
+        <div className="auth-brand-panel__content">
+          <p className="auth-brand-panel__eyebrow">A place for your story</p>
+          <h1>Every chapter deserves to be remembered.</h1>
+          <p className="auth-brand-panel__description">
+            Gather the photographs, milestones, and moments that make your life
+            yours.
+          </p>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <input
-          type="email"
-          placeholder="Email address"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          className="w-full p-3 rounded-lg border border-cream-300"
-        />
+          <div className="auth-story-art" aria-hidden="true">
+            <div className="auth-story-art__backdrop">
+              <span className="auth-story-art__moon" />
+              <span className="auth-story-art__ridge auth-story-art__ridge--back" />
+              <span className="auth-story-art__ridge auth-story-art__ridge--front" />
+              <span className="auth-story-art__star auth-story-art__star--one">✳</span>
+              <span className="auth-story-art__star auth-story-art__star--two">✦</span>
+            </div>
+            <div className="auth-story-art__note">
+              <span>YOUR STORY</span>
+              <span className="auth-story-art__note-rule" />
+              <Heart size={15} />
+            </div>
+          </div>
+        </div>
 
-        <input
-          type="password"
-          placeholder="Password (at least 6 characters)"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          minLength={6}
-          required
-          className="w-full p-3 rounded-lg border border-cream-300"
-        />
+        <p className="auth-brand-panel__footer">Keep what makes a life, a life.</p>
+      </section>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="btn-primary w-full py-3 disabled:opacity-50"
-        >
-          {loading ? 'Please wait...' : isLogin ? 'Sign In' : 'Sign Up'}
-        </button>
-      </form>
+      <section className="auth-form-panel">
+        <Link to="/" className="auth-back-link">
+          <ArrowLeft size={15} /> Back to Life Agent
+        </Link>
 
-      {message && (
-        <p role="status" className="mt-4 text-sm text-ink-600">
-          {message}
+        <div className="auth-form-wrap">
+          <span className="auth-form-mark"><Heart size={18} /></span>
+          <p className="auth-form-eyebrow">YOUR PERSONAL MEMORY SPACE</p>
+          <h2>{isLogin ? 'Welcome back' : 'Create your account'}</h2>
+          <p className="auth-form-intro">
+            {isLogin
+              ? 'Sign in to your Life Agent'
+              : 'Start collecting the moments that matter to you.'}
+          </p>
+
+          <form onSubmit={handleSubmit} className="auth-form">
+            <div className="auth-field">
+              <label htmlFor="auth-email">Email address</label>
+              <input
+                id="auth-email"
+                type="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
+            </div>
+
+            <div className="auth-field">
+              <label htmlFor="auth-password">Password</label>
+              <input
+                id="auth-password"
+                type="password"
+                autoComplete={isLogin ? 'current-password' : 'new-password'}
+                placeholder="At least 6 characters"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                minLength={6}
+                required
+              />
+            </div>
+
+            <button type="submit" disabled={loading} className="auth-submit">
+              {loading
+                ? 'Please wait...'
+                : isLogin
+                  ? 'Sign In'
+                  : 'Create Account'}
+              {!loading && <ArrowRight size={17} />}
+            </button>
+          </form>
+
+          {message && (
+            <p
+              role={isError ? 'alert' : 'status'}
+              className={`auth-message ${isError ? 'auth-message--error' : 'auth-message--success'}`}
+            >
+              {message}
+            </p>
+          )}
+
+          <p className="auth-mode-switch">
+            {isLogin ? 'New to Life Agent?' : 'Already have an account?'}
+            <button type="button" onClick={toggleMode}>
+              {isLogin ? 'Create an account' : 'Sign in'}
+            </button>
+          </p>
+        </div>
+
+        <p className="auth-form-footer">
+          Your story, collected at your own pace.
         </p>
-      )}
-
-      <button
-        type="button"
-        onClick={() => {
-          setIsLogin(!isLogin);
-          setMessage('');
-        }}
-        className="mt-5 text-sage-700 hover:underline text-sm"
-      >
-        {isLogin
-          ? 'New here? Create an account'
-          : 'Already have an account? Sign in'}
-      </button>
-    </div>
+      </section>
+    </main>
   );
 }

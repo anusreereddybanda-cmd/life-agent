@@ -1,6 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, NavLink, Link } from 'react-router-dom';
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  NavLink,
+  Link,
+  Navigate,
+  useLocation,
+} from 'react-router-dom';
 import { Heart, Menu, X } from 'lucide-react';
+import type { User } from '@supabase/supabase-js';
+import { supabase } from './supabase';
 
 // Pages
 import HomePage from './pages/HomePage';
@@ -13,9 +23,34 @@ import AgentPage from './pages/AgentPage';
 import SettingsPage from './pages/SettingsPage';
 import AuthPage from './pages/AuthPage';
 
+function ProtectedRoute({
+  user,
+  children,
+}: {
+  user: User | null | undefined;
+  children: React.ReactNode;
+}) {
+  const location = useLocation();
+
+  if (user === undefined) {
+    return (
+      <div className="glass-panel mx-6 my-12 p-8 text-center text-ink-500" role="status">
+        Checking your sign-in...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/auth" replace state={{ from: location }} />;
+  }
+
+  return <>{children}</>;
+}
+
 function Layout({ children }: { children: React.ReactNode }) {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const location = useLocation();
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 20);
@@ -30,6 +65,10 @@ function Layout({ children }: { children: React.ReactNode }) {
     { path: '/gallery', label: 'My Gallery' },
     { path: '/profile', label: 'My Profile' },
   ];
+
+  if (location.pathname === '/' || location.pathname === '/auth') {
+    return <div className="min-h-screen">{children}</div>;
+  }
 
   return (
     <div className="min-h-screen flex flex-col font-sans bg-cream-50">
@@ -56,6 +95,16 @@ function Layout({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="hidden md:flex items-center space-x-4">
+            <NavLink
+              to="/settings"
+              className={({ isActive }) =>
+                `text-sm font-medium transition-colors hover:text-sage-700 ${
+                  isActive ? 'text-sage-700' : 'text-ink-600'
+                }`
+              }
+            >
+              Settings
+            </NavLink>
             <Link to="/agent" className="text-sm font-medium text-ink-600 hover:text-sage-700 transition-colors">AI Assistant</Link>
             <Link to="/auth" onClick={() => setIsMobileMenuOpen(false)} className="btn-primary text-center bg-ink-900 text-white hover:bg-ink-800">Sign In</Link>
           </div>
@@ -85,6 +134,15 @@ function Layout({ children }: { children: React.ReactNode }) {
               </NavLink>
             ))}
             <div className="pt-4 border-t border-cream-200 flex flex-col space-y-3">
+              <NavLink
+                to="/settings"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={({ isActive }) =>
+                  `py-2 font-medium ${isActive ? 'text-sage-700' : 'text-ink-600'}`
+                }
+              >
+                Settings
+              </NavLink>
               <Link to="/agent" onClick={() => setIsMobileMenuOpen(false)} className="py-2 text-ink-600 font-medium">AI Assistant</Link>
               <Link to="/auth" onClick={() => setIsMobileMenuOpen(false)} className="btn-primary text-center bg-ink-900 text-white hover:bg-ink-800">Sign In</Link>
             </div>
@@ -103,19 +161,31 @@ function Layout({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
+  const [user, setUser] = useState<User | null>();
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
   return (
     <Router>
       <Layout>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/auth" element={<AuthPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/memories" element={<MemoriesPage />} />
-          <Route path="/timeline" element={<TimelinePage />} />
-          <Route path="/gallery" element={<GalleryPage />} />
-          <Route path="/achievements" element={<AchievementsPage />} />
-          <Route path="/agent" element={<AgentPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/profile" element={<ProtectedRoute user={user}><ProfilePage key={user?.id ?? ''} userId={user?.id ?? ''} /></ProtectedRoute>} />
+          <Route path="/memories" element={<ProtectedRoute user={user}><MemoriesPage key={user?.id ?? ''} userId={user?.id ?? ''} /></ProtectedRoute>} />
+          <Route path="/timeline" element={<ProtectedRoute user={user}><TimelinePage key={user?.id ?? ''} userId={user?.id ?? ''} /></ProtectedRoute>} />
+          <Route path="/gallery" element={<ProtectedRoute user={user}><GalleryPage key={user?.id ?? ''} userId={user?.id ?? ''} /></ProtectedRoute>} />
+          <Route path="/achievements" element={<ProtectedRoute user={user}><AchievementsPage /></ProtectedRoute>} />
+          <Route path="/agent" element={<ProtectedRoute user={user}><AgentPage key={user?.id ?? ''} userId={user?.id ?? ''} /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute user={user}><SettingsPage userEmail={user?.email} /></ProtectedRoute>} />
         </Routes>
       </Layout>
     </Router>
