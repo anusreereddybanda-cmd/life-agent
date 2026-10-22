@@ -1,80 +1,244 @@
+
+import { useEffect, useState, type FormEvent } from 'react';
 import { PenSquare, BookOpen } from 'lucide-react';
+import { supabase } from '../supabase';
+
+type Memory = {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  memory_date: string | null;
+};
 
 export default function MemoriesPage() {
+  const [showForm, setShowForm] = useState(false);
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState('College');
+  const [content, setContent] = useState('');
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  async function loadMemories() {
+    const { data, error } = await supabase
+      .from('memories')
+      .select('id, title, description, category, memory_date')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    setMemories(data ?? []);
+  }
+
+  useEffect(() => {
+    void loadMemories();
+  }, []);
+
+  async function handleSave(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSaving(true);
+    setErrorMessage('');
+
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError) throw authError;
+      if (!user) throw new Error('Please sign in again.');
+
+      const { error } = await supabase.from('memories').insert({
+        user_id: user.id,
+        title: title.trim(),
+        description: content.trim(),
+        category,
+        memory_date: new Date().toISOString().slice(0, 10),
+      });
+
+      if (error) throw error;
+
+      setTitle('');
+      setContent('');
+      setCategory('College');
+      setShowForm(false);
+
+      await loadMemories();
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : 'Could not save memory.'
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 h-full flex flex-col">
       <header className="flex justify-between items-end mb-4">
         <div>
-          <h1 className="text-4xl font-serif text-sage-800 mb-2">My Memories</h1>
-          <p className="text-ink-400">Chapters of my life, written by me.</p>
+          <h1 className="text-4xl font-serif text-sage-800 mb-2">
+            My Memories
+          </h1>
+          <p className="text-ink-400">
+            Chapters of my life, written by me.
+          </p>
         </div>
-        <button className="btn-primary flex items-center gap-2">
+
+        <button
+          type="button"
+          onClick={() => {
+            setShowForm(!showForm);
+            setErrorMessage('');
+          }}
+          className="btn-primary flex items-center gap-2"
+        >
           <PenSquare size={20} />
-          <span>New Entry</span>
+          <span>{showForm ? 'Cancel' : 'New Entry'}</span>
         </button>
       </header>
 
-      <div className="flex gap-4 mb-6 overflow-x-auto pb-2">
-        {['All', 'School', 'College', 'Family', 'Travel', 'Thoughts'].map((category, idx) => (
-          <button 
-            key={category}
-            className={`px-4 py-2 rounded-full whitespace-nowrap text-sm font-medium transition-colors ${
-              idx === 0 
-                ? 'bg-sage-600 text-white shadow-sm' 
-                : 'bg-cream-100 text-ink-500 hover:bg-cream-200 border border-cream-200'
-            }`}
+      {showForm && (
+        <form
+          onSubmit={handleSave}
+          className="glass-panel p-6 space-y-4"
+        >
+          <h2 className="text-2xl font-serif text-sage-800">
+            New Memory
+          </h2>
+
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Memory title"
+            required
+            className="w-full rounded-lg border border-cream-300 p-3"
+          />
+
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="w-full rounded-lg border border-cream-300 p-3"
           >
-            {category}
+            {['School', 'College', 'Family', 'Travel', 'Thoughts'].map(
+              (option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              )
+            )}
+          </select>
+
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="Write about this memory..."
+            required
+            rows={5}
+            className="w-full rounded-lg border border-cream-300 p-3"
+          />
+
+          {errorMessage && (
+            <p role="alert" className="text-red-600 text-sm">
+              {errorMessage}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="btn-primary px-6 py-3 disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save Memory'}
           </button>
-        ))}
+        </form>
+      )}
+
+      {!showForm && errorMessage && (
+        <p role="alert" className="text-red-600 text-sm">
+          {errorMessage}
+        </p>
+      )}
+
+      <div className="flex gap-4 mb-6 overflow-x-auto pb-2">
+        {['All', 'School', 'College', 'Family', 'Travel', 'Thoughts'].map(
+          (item, idx) => (
+            <span
+              key={item}
+              className={`px-4 py-2 rounded-full whitespace-nowrap text-sm font-medium ${
+                idx === 0
+                  ? 'bg-sage-600 text-white shadow-sm'
+                  : 'bg-cream-100 text-ink-500 border border-cream-200'
+              }`}
+            >
+              {item}
+            </span>
+          )
+        )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-12">
-        <MemoryCard 
-          date="August 12, 2014"
-          category="College"
-          title="First Day at University"
-          content="The campus was huge, and I felt completely lost. I remember walking into the wrong lecture hall and sitting through 20 minutes of Advanced Physics before realizing. Met Sarah at the campus cafe later, which made the day much better. The start of a new chapter!"
-        />
-        <MemoryCard 
-          date="June 05, 2018"
-          category="Travel"
-          title="Summer in Kyoto"
-          content="We visited the bamboo forest early in the morning. The light filtering through the tall green stalks was magical. The air felt completely different there. We spent the afternoon wandering through small streets and trying local sweets."
-        />
-        <MemoryCard 
-          date="December 24, 2020"
-          category="Family"
-          title="Christmas Eve Dinner"
-          content="Mom made her famous roast. The whole family was together for the first time in three years. We stayed up until 2 AM playing board games and laughing until our sides hurt. These are the moments I want to hold on to forever."
-        />
-        <MemoryCard 
-          date="March 15, 2010"
-          category="School"
-          title="Winning the Science Fair"
-          content="I couldn't believe it when they called my name. My volcano project actually won first place! Mr. Davis was so proud. I still have the blue ribbon saved in my old memory box at home."
-        />
-      </div>
+      {memories.length === 0 ? (
+        <p className="text-ink-400 py-8">
+          No saved memories yet. Click New Entry to add your first memory.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-12">
+          {memories.map((memory) => (
+            <MemoryCard
+              key={memory.id}
+              date={memory.memory_date ?? ''}
+              category={memory.category}
+              title={memory.title}
+              content={memory.description}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function MemoryCard({ date, category, title, content }: { date: string, category: string, title: string, content: string }) {
+function MemoryCard({
+  date,
+  category,
+  title,
+  content,
+}: {
+  date: string;
+  category: string;
+  title: string;
+  content: string;
+}) {
   return (
     <div className="glass-panel p-8 relative overflow-hidden group">
-      <div className="absolute top-0 left-0 w-2 h-full bg-sage-300 group-hover:bg-sage-500 transition-colors"></div>
+      <div className="absolute top-0 left-0 w-2 h-full bg-sage-300 group-hover:bg-sage-500 transition-colors" />
+
       <div className="flex justify-between items-start mb-4">
         <span className="text-sm font-medium text-sage-600 bg-sage-50 px-3 py-1 rounded-full border border-sage-100">
           {category}
         </span>
-        <span className="text-sm text-ink-400 font-serif italic">{date}</span>
+        <span className="text-sm text-ink-400 font-serif italic">
+          {date}
+        </span>
       </div>
-      <h3 className="text-2xl font-serif text-ink-900 mb-3">{title}</h3>
-      <p className="text-ink-500 leading-relaxed font-sans">{content}</p>
+
+      <h3 className="text-2xl font-serif text-ink-900 mb-3">
+        {title}
+      </h3>
+
+      <p className="text-ink-500 leading-relaxed font-sans whitespace-pre-wrap">
+        {content}
+      </p>
+
       <div className="mt-6 pt-4 border-t border-cream-200 flex justify-end">
-        <button className="text-sage-600 hover:text-sage-800 text-sm font-medium flex items-center gap-1">
-          <BookOpen size={16} /> Read full entry
-        </button>
+        <span className="text-sage-600 text-sm font-medium flex items-center gap-1">
+          <BookOpen size={16} /> Saved Memory
+        </span>
       </div>
     </div>
   );

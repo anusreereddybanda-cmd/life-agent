@@ -11,6 +11,7 @@ import GalleryPage from './pages/GalleryPage';
 import AchievementsPage from './pages/AchievementsPage';
 import AgentPage from './pages/AgentPage';
 import SettingsPage from './pages/SettingsPage';
+import AuthPage from './pages/AuthPage';
 
 function Layout({ children }: { children: React.ReactNode }) {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -56,7 +57,7 @@ function Layout({ children }: { children: React.ReactNode }) {
 
           <div className="hidden md:flex items-center space-x-4">
             <Link to="/agent" className="text-sm font-medium text-ink-600 hover:text-sage-700 transition-colors">AI Assistant</Link>
-            <Link to="/settings" className="btn-primary px-5 py-2 text-sm rounded-full bg-ink-900 text-white hover:bg-ink-800 shadow-none">Sign In</Link>
+            <Link to="/auth" onClick={() => setIsMobileMenuOpen(false)} className="btn-primary text-center bg-ink-900 text-white hover:bg-ink-800">Sign In</Link>
           </div>
 
           {/* Mobile Menu Button */}
@@ -85,7 +86,7 @@ function Layout({ children }: { children: React.ReactNode }) {
             ))}
             <div className="pt-4 border-t border-cream-200 flex flex-col space-y-3">
               <Link to="/agent" onClick={() => setIsMobileMenuOpen(false)} className="py-2 text-ink-600 font-medium">AI Assistant</Link>
-              <Link to="/settings" onClick={() => setIsMobileMenuOpen(false)} className="btn-primary text-center bg-ink-900 text-white hover:bg-ink-800">Sign In</Link>
+              <Link to="/auth" onClick={() => setIsMobileMenuOpen(false)} className="btn-primary text-center bg-ink-900 text-white hover:bg-ink-800">Sign In</Link>
             </div>
           </div>
         )}
@@ -107,6 +108,7 @@ function App() {
       <Layout>
         <Routes>
           <Route path="/" element={<HomePage />} />
+          <Route path="/auth" element={<AuthPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/memories" element={<MemoriesPage />} />
           <Route path="/timeline" element={<TimelinePage />} />
